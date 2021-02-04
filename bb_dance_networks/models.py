@@ -3,6 +3,8 @@ import torch.nn
 import torch.optim
 import numpy as np
 
+import bb_behavior.utils.model_selection
+
 
 class TrajectorySeq2Seq(torch.nn.Module):
     def __init__(self, embedding_size, sequence_size, n_classes):
@@ -80,7 +82,7 @@ class TrajectoryClassificationModel(torch.nn.Module):
 
     def train_batch(
         self,
-        datareader,
+        X,
         Y,
         batch_number,
         batch_statistics_dict,
@@ -92,19 +94,19 @@ class TrajectoryClassificationModel(torch.nn.Module):
                 weight=torch.Tensor([0.01, 1.0, 1.0]).to(torch.device(device))
             )
 
-        sample_indices = np.arange(0, datareader.X.shape[0], dtype=np.int)
+        sample_indices = np.arange(0, X.shape[0], dtype=np.int)
         batch_size = initial_batch_size + batch_number // 500
 
         drawn_sample_indices = np.random.choice(
             sample_indices, size=batch_size, replace=False
         )
-        samples = datareader.X[drawn_sample_indices]
-        X = torch.from_numpy(samples).cuda()
+        samples = X[drawn_sample_indices]
+        batch_X = torch.from_numpy(samples).cuda()
 
         labels = Y[drawn_sample_indices, 31:-31]
         labels = torch.from_numpy(labels.astype(np.int)).cuda()
 
-        prediction = self(X)
+        prediction = self(batch_X)
         prediction = prediction.permute(0, 2, 1)
         prediction = prediction.reshape(batch_size * prediction.shape[1], 3)
         labels = labels.view(batch_size * labels.shape[1])
@@ -112,3 +114,16 @@ class TrajectoryClassificationModel(torch.nn.Module):
 
         batch_statistics_dict["traj_prediction_loss"].append(loss.data.cpu().numpy())
         return loss
+
+    def predict_trajectories(self, X):
+        self.eval()
+        trajectory_predictions = []
+        for batch in bb_behavior.utils.model_selection.iterate_minibatches(
+            X, None, 2048, include_small_last_batch=True
+        ):
+            pred = self(torch.from_numpy(batch).cuda())
+            trajectory_predictions.append(pred.detach().cpu().numpy())
+
+        trajectory_predictions = np.concatenate(trajectory_predictions)
+
+        return trajectory_predictions

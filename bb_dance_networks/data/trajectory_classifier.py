@@ -23,16 +23,14 @@ def subsample_df(df, unlabelled_ratio=0.05, verbose=True):
 
 def generate_label_sequences(drawn_samples, all_samples_df, frame_margin, fps):
     temporal_margin = frame_margin / fps
-    frames_per_trajectory = frame_margin * 2 + 1
+    frames_per_trajectory = frame_margin * 2
 
     temporal_labels = []
     for (bee_id, timestamp) in tqdm.auto.tqdm(
         drawn_samples[["bee_id", "timestamp"]].itertuples(index=False),
         total=drawn_samples.shape[0],
     ):
-        begin_ts, end_ts = timestamp - temporal_margin, (
-            timestamp + temporal_margin + 1 / fps
-        )
+        begin_ts, end_ts = timestamp - temporal_margin, (timestamp + temporal_margin)
         available_labels = all_samples_df[all_samples_df.bee_id == bee_id]
         available_labels = available_labels[
             available_labels.timestamp.between(begin_ts, end_ts)
@@ -66,6 +64,9 @@ def generate_data_for_ground_truth(
     def target_to_index(t):
         return ["nothing", "follower", "waggle"].index(t)
 
+    all_samples_df["group"] = all_samples_df.timestamp.apply(
+        lambda t: t // (60 * 60)
+    ).astype(np.int)
     all_samples_df["label"] = all_samples_df.label.apply(target_to_index)
 
     # Reduce amount of data for the long trajectories.
