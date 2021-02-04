@@ -1,3 +1,4 @@
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import tqdm.auto
@@ -55,3 +56,27 @@ def run_train_loop(
         torch.cuda.empty_cache()
 
     return statistics, optimizer
+
+
+def plot_training_losses(statistics):
+    name_mapping = dict(
+        reg="Regularization",
+        prediction_loss="Embedding pred. loss",
+        comparison_loss="Embedding comp. loss",
+        support_loss="Embedding support loss",
+        traj_prediction_loss="Trajectory pred. loss",
+    )
+
+    fig, ax = plt.subplots(figsize=(20, 5))
+
+    def moving_average(a, n=1000):
+        ret = np.nancumsum(a, dtype=float)
+        ret[n:] = ret[n:] - ret[:-n]
+        return ret[n - 1 :] / n
+
+    for key, values in statistics.items():
+        if key in name_mapping:
+            key = name_mapping[key]
+        ax.plot(moving_average(values), label=key)
+    ax.legend()
+    plt.show()
