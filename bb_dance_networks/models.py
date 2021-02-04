@@ -37,9 +37,6 @@ class TrajectorySeq2Seq(torch.nn.Module):
 
 
 class TrajectoryClassificationModel(torch.nn.Module):
-
-    loss_function = None
-
     def __init__(
         self,
         feature_channels,
@@ -49,6 +46,8 @@ class TrajectoryClassificationModel(torch.nn.Module):
         embedding_model_class,
     ):
         super().__init__()
+
+        self.loss_function = None
 
         self.embedding = embedding_model_class(
             channels=feature_channels, n_classes=n_classes
@@ -106,11 +105,10 @@ class TrajectoryClassificationModel(torch.nn.Module):
         labels = torch.from_numpy(labels.astype(np.int)).cuda()
 
         prediction = self(X)
-        prediction = prediction.view(batch_size * prediction.shape[2], 3)
+        prediction = prediction.permute(0, 2, 1)
+        prediction = prediction.reshape(batch_size * prediction.shape[1], 3)
         labels = labels.view(batch_size * labels.shape[1])
-
         loss = self.loss_function(prediction, labels)
 
         batch_statistics_dict["traj_prediction_loss"].append(loss.data.cpu().numpy())
-
         return loss
