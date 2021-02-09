@@ -55,12 +55,14 @@ def generate_label_sequences(drawn_samples, all_samples_df, frame_margin, fps):
 
 def generate_data_for_ground_truth(
     all_samples_df,
-    unlabelled_ratio=0.01,
+    unlabelled_ratio=0.1,
     frame_margin=6 * 3 * 3,
     fps=6,
     n_subsample_results=None,
     verbose=True,
 ):
+    all_samples_df = all_samples_df.copy()
+
     def target_to_index(t):
         return ["nothing", "follower", "waggle"].index(t)
 
@@ -74,28 +76,7 @@ def generate_data_for_ground_truth(
         all_samples_df, verbose=verbose, unlabelled_ratio=unlabelled_ratio
     )
 
-    # Further reduce to one sample per X sec per individual.
-    reduced_samples_df["sample_interval"] = reduced_samples_df.timestamp.apply(
-        lambda t: t // (5)
-    ).astype(np.int)
-
-    sample_pivot = reduced_samples_df.pivot_table(
-        index=["bee_id", "sample_interval"], values="frame_id", aggfunc="count"
-    )
-    sample_pivot.columns = ["cnt"]
-    sample_pivot = sample_pivot.reset_index(level=(0, 1))
-    sample_pivot["sample_index"] = np.arange(0, sample_pivot.shape[0]).astype(np.int)
-
-    drawn_samples = reduced_samples_df.merge(
-        sample_pivot, on=["bee_id", "sample_interval"], how="inner"
-    )
-
-    drawn_samples = drawn_samples.groupby("sample_index").apply(lambda df: df.sample(1))
-    print(
-        "Reduced to one sample per behavior ({} samples).".format(
-            drawn_samples.shape[0]
-        )
-    )
+    drawn_samples = reduced_samples_df
 
     temporal_labels = generate_label_sequences(
         drawn_samples, all_samples_df=all_samples_df, frame_margin=frame_margin, fps=fps
