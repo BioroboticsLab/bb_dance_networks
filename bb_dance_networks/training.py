@@ -12,6 +12,7 @@ def run_train_loop(
     full_trajectories_labels_train,
     full_trajectories_labels_test,
     n_batches=100000,
+    full_trajectory_lr_factor=0.1,
     statistics=None,
     optimizer=None,
 ):
@@ -23,6 +24,10 @@ def run_train_loop(
         from collections import defaultdict
 
         statistics = defaultdict(list)
+
+    n_pretrained_batches = 0
+    if len(statistics) > 0:
+        n_pretrained_batches = max((len(v) for k, v in statistics.items()))
 
     trange = tqdm.auto.tqdm(total=n_batches)
     model.train()
@@ -37,7 +42,8 @@ def run_train_loop(
                 batch_index,
                 batch_statistics_dict=statistics,
             )
-            L += model.train_batch(
+
+            L += full_trajectory_lr_factor * model.train_batch(
                 datareader_full_trajectories.train_X,
                 full_trajectories_labels_train,
                 batch_index,
@@ -49,9 +55,11 @@ def run_train_loop(
             if batch_index % 200 == 0:
                 model.eval()
                 test_loss = torch.nn.CrossEntropyLoss()
-                pred = model.predict_trajectories(datareader_full_trajectories.test_X)
+                pred = model.predict_trajectories(
+                    datareader_full_trajectories.test_X, return_logits=True
+                )
                 margin = (full_trajectories_labels_test.shape[1] - pred.shape[2]) // 2
-                ground_truth = full_trajectories_labels_test[:, margin:-margin]
+                ground_truth = full_trajectories_labels_test[:, margin : -(margin + 1)]
 
                 ce_loss = np.nan
                 if test_loss is not None:
@@ -64,11 +72,42 @@ def run_train_loop(
                     )
                     ce_loss = test_loss(prediction, labels).data.cpu().numpy()
 
-                acc = sklearn.metrics.balanced_accuracy_score(
-                    ground_truth.flatten(), np.argmax(pred, axis=1).flatten()
+                mid_idx = ground_truth.shape[1] // 2
+                gt_classes = ground_truth[:, mid_idx]
+                pred_classes = pred[:, :, mid_idx]
+
+                middle_idx_acc = sklearn.metrics.balanced_accuracy_score(
+                    gt_classes.flatten(),
+                    np.argmax(pred_classes, axis=1).flatten(),
+                    adjusted=True,
                 )
-                statistics["test_accuracy"].append((batch_index, acc))
-                statistics["test_crossentropy"].append((batch_index, ce_loss))
+
+                middle_idx_acc2 = sklearn.metrics.balanced_accuracy_score(
+                    datareader_full_trajectories.test_Y.flatten(),
+                    np.argmax(pred_classes, axis=1).flatten(),
+                    adjusted=True,
+                )
+
+                all_timesteps_acc = sklearn.metrics.balanced_accuracy_score(
+                    ground_truth.flatten(),
+                    np.argmax(pred, axis=1).flatten(),
+                    adjusted=True,
+                )
+                statistics["test_accuracy_all_timesteps"].append(
+                    (n_pretrained_batches + batch_index, all_timesteps_acc)
+                )
+
+                statistics["test_accuracy_center_timestep"].append(
+                    (n_pretrained_batches + batch_index, middle_idx_acc)
+                )
+
+                statistics["test_accuracy_gt_label"].append(
+                    (n_pretrained_batches + batch_index, middle_idx_acc2)
+                )
+
+                statistics["test_crossentropy"].append(
+                    (n_pretrained_batches + batch_index, ce_loss)
+                )
                 model.train()
 
             postfix_dict = dict()
@@ -99,7 +138,7 @@ def plot_training_losses(statistics):
         traj_prediction_loss="Trajectory pred. loss",
     )
 
-    fig, ax = plt.subplots(figsize=(20, 5))
+    fig, ax = plt.subplots(figsize=(10, 4))
 
     def moving_average(a, n=1000):
         ret = np.nancumsum(a, dtype=float)
