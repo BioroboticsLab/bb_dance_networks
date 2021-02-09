@@ -7,3 +7,4 @@ torchvision
 matplotlib
 pre-commit
 black
+openTSNE
