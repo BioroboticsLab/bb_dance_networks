@@ -55,7 +55,7 @@ def generate_label_sequences(drawn_samples, all_samples_df, frame_margin, fps):
 
 def generate_data_for_ground_truth(
     all_samples_df,
-    unlabelled_ratio=0.05,
+    unlabelled_ratio=0.01,
     frame_margin=6 * 3 * 3,
     fps=6,
     n_subsample_results=None,
@@ -74,9 +74,9 @@ def generate_data_for_ground_truth(
         all_samples_df, verbose=verbose, unlabelled_ratio=unlabelled_ratio
     )
 
-    # Further reduce to one sample per 30 sec per individual.
+    # Further reduce to one sample per X sec per individual.
     reduced_samples_df["sample_interval"] = reduced_samples_df.timestamp.apply(
-        lambda t: t // (30)
+        lambda t: t // (5)
     ).astype(np.int)
 
     sample_pivot = reduced_samples_df.pivot_table(
