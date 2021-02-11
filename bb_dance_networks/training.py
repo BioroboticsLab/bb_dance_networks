@@ -59,7 +59,7 @@ def run_train_loop(
                     datareader_full_trajectories.test_X, return_logits=True
                 )
                 margin = (full_trajectories_labels_test.shape[1] - pred.shape[2]) // 2
-                ground_truth = full_trajectories_labels_test[:, margin : -(margin + 1)]
+                ground_truth = full_trajectories_labels_test[:, margin:-(margin)]
 
                 ce_loss = np.nan
                 if test_loss is not None:

@@ -9,7 +9,7 @@ from collections import Counter
 
 def calculate_track_statistics(model, X, Y):
     model.eval()
-    trajectory_predictions = model.predict_trajectories(X)
+    trajectory_predictions = model.predict_trajectories(X, medianfilter=True)
 
     statistics = []
 
