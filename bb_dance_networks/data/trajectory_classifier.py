@@ -1,3 +1,4 @@
+import bisect
 import numpy as np
 import pandas
 import tqdm.auto
@@ -35,18 +36,27 @@ def generate_label_sequences(drawn_samples, all_samples_df, frame_margin, fps):
         available_labels = available_labels[
             available_labels.timestamp.between(begin_ts, end_ts)
         ]
+
         available_labels = available_labels.sort_values("timestamp")
+        available_timestamps = available_labels.timestamp.values
+        available_labels = available_labels.label.values
+
         labels = np.zeros(shape=[1, frames_per_trajectory])
-        df_row_idx = 0
         for idx, ts in enumerate(
             np.linspace(begin_ts, end_ts, num=frames_per_trajectory)
         ):
-            row = available_labels.iloc[df_row_idx, :]
-            if row.timestamp <= ts:
-                labels[0, idx] = row.label
-                df_row_idx += 1
-                if df_row_idx >= available_labels.shape[0]:
-                    break
+            label_index = bisect.bisect_left(available_timestamps, ts)
+            # Before the start of any label.
+            if label_index == 0 and available_timestamps[0] < ts:
+                continue
+            # Any label ended before that.
+            if label_index == len(available_timestamps):
+                continue
+            if available_timestamps[label_index] > ts:
+                labels[0, idx] = available_labels[label_index - 1]
+            else:
+                assert available_timestamps[label_index] == ts
+                labels[0, idx] = available_labels[label_index]
         temporal_labels.append(labels)
     temporal_labels = np.concatenate(temporal_labels, axis=0)
 
