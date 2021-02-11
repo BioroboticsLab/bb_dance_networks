@@ -4,6 +4,7 @@ import torch.optim
 import numpy as np
 
 import bb_behavior.utils.model_selection
+import scipy.ndimage
 
 
 class TrajectorySeq2Seq(torch.nn.Module):
@@ -52,7 +53,9 @@ class TrajectoryClassificationModel(torch.nn.Module):
         self.loss_function = None
 
         self.embedding = embedding_model_class(
-            channels=feature_channels, n_classes=n_classes
+            channels=feature_channels,
+            n_classes=n_classes,
+            temporal_dimension=embedding_input_length,
         )
         self.traj2traj = TrajectorySeq2Seq(
             embedding_size=self.embedding.embedding_size,
@@ -106,7 +109,7 @@ class TrajectoryClassificationModel(torch.nn.Module):
         prediction = self(batch_X)
 
         cut_off_margin = (Y.shape[1] - prediction.shape[2]) // 2
-        labels = Y[drawn_sample_indices, cut_off_margin : -(cut_off_margin + 1)]
+        labels = Y[drawn_sample_indices, cut_off_margin:-(cut_off_margin)]
         assert labels.shape[1] == prediction.shape[2]
         labels = torch.from_numpy(labels.astype(np.int)).cuda()
 
@@ -119,16 +122,21 @@ class TrajectoryClassificationModel(torch.nn.Module):
         batch_statistics_dict["traj_prediction_loss"].append(loss.data.cpu().numpy())
         return loss
 
-    def predict_trajectories(self, X, return_logits=False):
+    def predict_trajectories(self, X, return_logits=False, medianfilter=False):
         self.eval()
         trajectory_predictions = []
         for batch in bb_behavior.utils.model_selection.iterate_minibatches(
             X, None, 2048, include_small_last_batch=True
         ):
             pred = self(torch.from_numpy(batch).cuda())
+
             if not return_logits:
                 pred = torch.nn.functional.softmax(pred, dim=1)
             pred = pred.detach().cpu().numpy()
+
+            if medianfilter:
+                pred = scipy.ndimage.median_filter(pred, size=(1, 1, 5))
+
             trajectory_predictions.append(pred)
 
         trajectory_predictions = np.concatenate(trajectory_predictions)
