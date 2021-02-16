@@ -2,11 +2,8 @@ import numpy as np
 
 
 class FeatureNormalizer:
-
-    percentiles = None
-
     def __init__(self):
-        pass
+        self.percentiles = None
 
     def fit(self, X, verbose=False):
         X = X.copy()
@@ -29,3 +26,30 @@ class FeatureNormalizer:
             X[:, i] -= self.data_means[i]
             X[:, i] /= self.data_stds[i]
         return X
+
+    def to_dict(self):
+        return dict(
+            percentiles=self.percentiles,
+            data_means=self.data_means,
+            data_stds=self.data_stds,
+        )
+
+    @staticmethod
+    def from_dict(d):
+        normalizer = FeatureNormalizer()
+        normalizer.percentiles = d["percentiles"]
+        normalizer.data_means = d["data_means"]
+        normalizer.data_stds = d["data_stds"]
+        return normalizer
+
+    def save(self, filename):
+        import joblib
+
+        joblib.dump(self.to_dict(), filename)
+
+    @staticmethod
+    def load(filename):
+        import joblib
+
+        d = joblib.load(filename)
+        return FeatureNormalizer.from_dict(d)
