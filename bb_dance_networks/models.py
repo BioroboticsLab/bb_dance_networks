@@ -89,7 +89,7 @@ class TrajectoryClassificationModel(torch.nn.Module):
         Y,
         batch_number,
         batch_statistics_dict,
-        initial_batch_size=64,
+        initial_batch_size=512,
         device="cuda",
     ):
         if self.loss_function is None:
@@ -98,7 +98,7 @@ class TrajectoryClassificationModel(torch.nn.Module):
             )
 
         sample_indices = np.arange(0, X.shape[0], dtype=np.int)
-        batch_size = initial_batch_size + batch_number // 500
+        batch_size = initial_batch_size
 
         drawn_sample_indices = np.random.choice(
             sample_indices, size=batch_size, replace=False
@@ -119,7 +119,9 @@ class TrajectoryClassificationModel(torch.nn.Module):
         labels = labels.view(batch_size * labels.shape[1])
         loss = self.loss_function(prediction, labels)
 
-        batch_statistics_dict["traj_prediction_loss"].append(loss.data.cpu().numpy())
+        batch_statistics_dict["traj_prediction_loss"].append(
+            (batch_number, loss.data.cpu().numpy())
+        )
         return loss
 
     def predict_trajectories(self, X, return_logits=False, medianfilter=False):
