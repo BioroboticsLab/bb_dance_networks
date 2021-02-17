@@ -33,7 +33,9 @@ def run_train_loop(
     model.train()
 
     try:
-        for batch_index in range(n_batches):
+        for batch_index in range(
+            n_pretrained_batches, n_pretrained_batches + n_batches
+        ):
 
             model.zero_grad()
             L = model.embedding.train_batch(
@@ -43,12 +45,13 @@ def run_train_loop(
                 batch_statistics_dict=statistics,
             )
 
-            L += full_trajectory_lr_factor * model.train_batch(
-                datareader_full_trajectories.train_X,
-                full_trajectories_labels_train,
-                batch_index,
-                batch_statistics_dict=statistics,
-            )
+            if batch_index % 20 == 0:
+                L += full_trajectory_lr_factor * model.train_batch(
+                    datareader_full_trajectories.train_X,
+                    full_trajectories_labels_train,
+                    batch_index,
+                    batch_statistics_dict=statistics,
+                )
             L.backward()
             optimizer.step()
 
@@ -94,20 +97,18 @@ def run_train_loop(
                     adjusted=True,
                 )
                 statistics["test_accuracy_all_timesteps"].append(
-                    (n_pretrained_batches + batch_index, all_timesteps_acc)
+                    (batch_index, all_timesteps_acc)
                 )
 
                 statistics["test_accuracy_center_timestep"].append(
-                    (n_pretrained_batches + batch_index, middle_idx_acc)
+                    (batch_index, middle_idx_acc)
                 )
 
                 statistics["test_accuracy_gt_label"].append(
-                    (n_pretrained_batches + batch_index, middle_idx_acc2)
+                    (batch_index, middle_idx_acc2)
                 )
 
-                statistics["test_crossentropy"].append(
-                    (n_pretrained_batches + batch_index, ce_loss)
-                )
+                statistics["test_crossentropy"].append((batch_index, ce_loss))
                 model.train()
 
             postfix_dict = dict()
@@ -146,12 +147,19 @@ def plot_training_losses(statistics):
         return ret[n - 1 :] / n
 
     for key, values in statistics.items():
+        if len(values) == 0:
+            continue
         if key in name_mapping:
             key = name_mapping[key]
         if type(values[0]) is tuple:
             x, y = zip(*values)
+            y = [float(_y) for _y in y]
             ax.plot(x, y, label=key)
         else:
-            ax.plot(moving_average(values), label=key)
+            try:
+                values = [float(v) for v in values]
+                ax.plot(moving_average(values), label=key)
+            except Exception as e:
+                print((key, str(e)))
     ax.legend()
     plt.show()
