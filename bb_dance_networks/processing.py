@@ -223,6 +223,7 @@ def fetch_follower_from_database(
     min_following_duration=datetime.timedelta(seconds=1),
     max_following_gap_length=datetime.timedelta(seconds=2),
     verbose=False,
+    fps=6,
 ):
     from collections import Counter
     import bb_behavior.db.sampling
@@ -252,8 +253,8 @@ def fetch_follower_from_database(
                     if det is None:
                         continue
                     (ts, frame_id, x, y, orientation, track_id) = det
-                    xlim = [x - 20, x + 20]
-                    ylim = [y - 20, y + 20]
+                    xlim = [x - 14, x + 14]
+                    ylim = [y - 14, y + 14]
                     candidates = (
                         bb_behavior.db.sampling.get_detections_for_location_in_frame(
                             frame_id,
@@ -267,11 +268,22 @@ def fetch_follower_from_database(
 
                     for candidate in candidates:
                         bee_id = candidate[0]
-                        if bee_id is None:
+                        c_o = candidate[8]
+                        if bee_id is None:  # Drop unmarked bees.
                             continue
+                        if c_o is None:
+                            # Bees without orientation are usually in cells / on the glass..
+                            continue
+
                         ts = candidate[1]
                         c_x, c_y = candidate[6:8]
-                        c_o = candidate[8]
+
+                        dxy = np.array([(x - c_x), (y - c_y)], dtype=np.float32)
+                        dxy /= np.linalg.norm(dxy)
+                        oxy = np.array([np.cos(c_o), np.sin(c_o)])
+                        relative_angle = np.inner(dxy, oxy)
+                        if relative_angle < 0.5:
+                            continue
 
                         bee_id_count[bee_id] += 1
                         bee_candidates.append(dict(bee_id=bee_id, timestamp=ts))
@@ -279,7 +291,7 @@ def fetch_follower_from_database(
                 bee_candidates = pandas.DataFrame(
                     bee_candidates, columns=["bee_id", "timestamp"]
                 )
-                valid_bee_ids = {ID for ID, cnt in bee_id_count.items() if cnt >= 6}
+                valid_bee_ids = {ID for ID, cnt in bee_id_count.items() if cnt >= fps}
                 bee_candidates = bee_candidates[
                     bee_candidates.bee_id.isin(valid_bee_ids)
                 ]
@@ -288,8 +300,8 @@ def fetch_follower_from_database(
                     follower_df = follower_df.sort_values("timestamp")
 
                     def fetch_label(timestamp):
-                        begin = timestamp - datetime.timedelta(seconds=0.25)
-                        end = timestamp + datetime.timedelta(seconds=0.25)
+                        begin = timestamp - datetime.timedelta(seconds=1.0 / fps)
+                        end = timestamp + datetime.timedelta(seconds=1.0 / fps)
 
                         events = all_events[(all_events.bee_id == follower_id)]
                         events = events[
