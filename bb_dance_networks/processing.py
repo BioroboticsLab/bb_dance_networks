@@ -187,8 +187,8 @@ def merge_consecutive_events(
 
 def extract_consecutive_dance_events(
     all_events,
-    min_dance_duration=datetime.timedelta(seconds=2),
-    max_dance_gap_length=datetime.timedelta(seconds=2),
+    min_dance_duration=datetime.timedelta(seconds=3),
+    max_dance_gap_length=datetime.timedelta(seconds=3),
 ):
     dances_df = []
 
@@ -221,7 +221,7 @@ def fetch_follower_from_database(
     dances_df,
     all_events,
     min_following_duration=datetime.timedelta(seconds=1),
-    max_following_gap_length=datetime.timedelta(seconds=2),
+    max_following_gap_length=datetime.timedelta(seconds=3),
     verbose=False,
     fps=6,
 ):
@@ -231,7 +231,7 @@ def fetch_follower_from_database(
     all_follower_events = []
 
     with bb_behavior.db.DatabaseCursorContext() as cursor:
-        for bee_id, bee_df in dances_df.groupby("bee_id"):
+        for dancer_bee_id, bee_df in dances_df.groupby("bee_id"):
             for (dance_id, dt_from, dt_to, cam_id) in bee_df[
                 ["dance_id", "from", "to", "cam_id"]
             ].itertuples(index=False):
@@ -239,7 +239,7 @@ def fetch_follower_from_database(
                     cam_id, dt_from, dt_to, cursor=cursor, cursor_is_prepared=True
                 )
                 detections = bb_behavior.db.get_bee_detections(
-                    bee_id,
+                    dancer_bee_id,
                     frames=frames,
                     use_hive_coords=True,
                     cursor=cursor,
@@ -269,7 +269,8 @@ def fetch_follower_from_database(
                     for candidate in candidates:
                         bee_id = candidate[0]
                         c_o = candidate[8]
-                        if bee_id is None:  # Drop unmarked bees.
+                        if (bee_id is None) or (bee_id == dancer_bee_id):
+                            # Drop unmarked bees/dancer.
                             continue
                         if c_o is None:
                             # Bees without orientation are usually in cells / on the glass..
@@ -278,6 +279,7 @@ def fetch_follower_from_database(
                         ts = candidate[1]
                         c_x, c_y = candidate[6:8]
 
+                        # Calculate orientation to check whether potential follower is orientated towards dancer.
                         dxy = np.array([(x - c_x), (y - c_y)], dtype=np.float32)
                         dxy /= np.linalg.norm(dxy)
                         oxy = np.array([np.cos(c_o), np.sin(c_o)])
@@ -320,7 +322,7 @@ def fetch_follower_from_database(
                                     )
                                 )
                             label = label[-1]
-                            label = ["nothing", "follower", "dancing"][label]
+                            label = ["nothing", "follower", "follower"][label]
 
                         return label
 
