@@ -15,10 +15,12 @@ def run_train_loop(
     full_trajectory_lr_factor=0.1,
     statistics=None,
     optimizer=None,
+    lr_scheduler=None,
+    next_warm_restart=100,
 ):
 
     if optimizer is None:
-        optimizer = torch.optim.Adam(model.parameters())
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
 
     if statistics is None:
         from collections import defaultdict
@@ -37,6 +39,18 @@ def run_train_loop(
             n_pretrained_batches, n_pretrained_batches + n_batches
         ):
 
+            if (batch_index == next_warm_restart) or (lr_scheduler is None):
+                next_phaseout = 100
+                if lr_scheduler is not None:
+                    next_phaseout = 2 * lr_scheduler.T_max
+                next_warm_restart = batch_index + next_phaseout
+                lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                    optimizer, next_phaseout
+                )
+            statistics["learning_rate"].append(
+                (batch_index, lr_scheduler.get_last_lr())
+            )
+
             model.zero_grad()
             L = model.embedding.train_batch(
                 datareader_embeddings.train_X,
@@ -54,6 +68,7 @@ def run_train_loop(
                 )
             L.backward()
             optimizer.step()
+            lr_scheduler.step()
 
             if batch_index % 200 == 0:
                 model.eval()
@@ -85,10 +100,10 @@ def run_train_loop(
                     adjusted=True,
                 )
 
-                middle_idx_acc2 = sklearn.metrics.balanced_accuracy_score(
-                    datareader_full_trajectories.test_Y.flatten(),
-                    np.argmax(pred_classes, axis=1).flatten(),
-                    adjusted=True,
+                all_timesteps_f1 = sklearn.metrics.f1_score(
+                    ground_truth.flatten(),
+                    np.argmax(pred, axis=1).flatten(),
+                    average="macro",
                 )
 
                 all_timesteps_acc = sklearn.metrics.balanced_accuracy_score(
@@ -96,6 +111,7 @@ def run_train_loop(
                     np.argmax(pred, axis=1).flatten(),
                     adjusted=True,
                 )
+
                 statistics["test_accuracy_all_timesteps"].append(
                     (batch_index, all_timesteps_acc)
                 )
@@ -104,9 +120,7 @@ def run_train_loop(
                     (batch_index, middle_idx_acc)
                 )
 
-                statistics["test_accuracy_gt_label"].append(
-                    (batch_index, middle_idx_acc2)
-                )
+                statistics["test_f1_score"].append((batch_index, all_timesteps_f1))
 
                 statistics["test_crossentropy"].append((batch_index, ce_loss))
                 model.train()
@@ -127,7 +141,7 @@ def run_train_loop(
     finally:
         torch.cuda.empty_cache()
 
-    return statistics, optimizer
+    return statistics, optimizer, lr_scheduler, next_warm_restart
 
 
 def plot_training_losses(statistics):
@@ -151,13 +165,19 @@ def plot_training_losses(statistics):
             continue
         if key in name_mapping:
             key = name_mapping[key]
+
+        def fix_value(v):
+            if type(v) is list:
+                v = v[0]
+            return float(v)
+
         if type(values[0]) is tuple:
             x, y = zip(*values)
-            y = [float(_y) for _y in y]
+            y = [fix_value(_y) for _y in y]
             ax.plot(x, y, label=key)
         else:
             try:
-                values = [float(v) for v in values]
+                values = [fix_value(v) for v in values]
                 ax.plot(moving_average(values), label=key)
             except Exception as e:
                 print((key, str(e)))
