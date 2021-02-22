@@ -4,6 +4,104 @@ import torch
 import tqdm.auto
 import sklearn.metrics
 
+from .preprocessing import FeatureNormalizer
+
+import bb_behavior.trajectory.features
+
+
+def load_all_training_data(root_path, verbose=False):
+
+    with open(root_path + "/BB2019_train_groups.npz", "rb") as f:
+        precalculated_train_groups = np.load(f)["arr_0"]
+
+    datareader_full_trajectories = bb_behavior.trajectory.features.DataReader.load(
+        root_path + "BB2019_longtraj_datareader.h5"
+    )
+    datareader_full_trajectories._groups = (
+        datareader_full_trajectories.samples.timestamp.apply(lambda t: t // (60 * 60))
+        .astype(np.int)
+        .values[datareader_full_trajectories._valid_sample_indices]
+    )
+
+    datareader_full_trajectories.create_train_test_split(
+        predefined_train_groups=precalculated_train_groups
+    )
+    if verbose:
+        print(
+            "Trajectory shape: {}, train set: {}, test set: {}".format(
+                datareader_full_trajectories.X.shape,
+                datareader_full_trajectories.train_X.shape,
+                datareader_full_trajectories.test_X.shape,
+            )
+        )
+
+    datareader_embeddings = bb_behavior.trajectory.features.DataReader.load(
+        root_path + "BB2019_embd_datareader.h5"
+    )
+    datareader_embeddings._groups = (
+        datareader_embeddings.samples.timestamp.apply(lambda t: t // (60 * 60))
+        .astype(np.int)
+        .values[datareader_embeddings._valid_sample_indices]
+    )
+    datareader_embeddings.create_train_test_split(
+        predefined_train_groups=precalculated_train_groups
+    )
+    if verbose:
+        print(
+            "Small embeddings shape: {}, train set: {}, test set: {}".format(
+                datareader_embeddings.X.shape,
+                datareader_embeddings.train_X.shape,
+                datareader_embeddings.test_X.shape,
+            )
+        )
+
+    with open(root_path + "BB2019_longtraj_labels.npz", "rb") as f:
+        full_trajectories_labels = np.load(f)["arr_0"]
+    train_idx = np.isin(
+        datareader_full_trajectories._groups, precalculated_train_groups
+    )
+    full_trajectories_labels = full_trajectories_labels[:, :-1]
+    full_trajectories_labels_train = full_trajectories_labels[train_idx]
+    full_trajectories_labels_test = full_trajectories_labels[~train_idx]
+    if verbose:
+        print(
+            "Trajectory labels shape: {}, train set: {}, test set: {}".format(
+                full_trajectories_labels.shape,
+                full_trajectories_labels_train.shape,
+                full_trajectories_labels_test.shape,
+            )
+        )
+
+    feature_normalizer = FeatureNormalizer().fit(datareader_embeddings.train_X)
+    datareader_embeddings.X[:] = feature_normalizer.transform(datareader_embeddings.X)[
+        :
+    ]
+    datareader_embeddings.train_X[:] = feature_normalizer.transform(
+        datareader_embeddings.train_X
+    )[:]
+    datareader_embeddings.test_X[:] = feature_normalizer.transform(
+        datareader_embeddings.test_X
+    )[:]
+
+    datareader_full_trajectories.X[:] = feature_normalizer.transform(
+        datareader_full_trajectories.X
+    )[:]
+    datareader_full_trajectories.train_X[:] = feature_normalizer.transform(
+        datareader_full_trajectories.train_X
+    )[:]
+    datareader_full_trajectories.test_X[:] = feature_normalizer.transform(
+        datareader_full_trajectories.test_X
+    )[:]
+
+    return (
+        datareader_embeddings,
+        datareader_full_trajectories,
+        full_trajectories_labels,
+        full_trajectories_labels_train,
+        full_trajectories_labels_test,
+        feature_normalizer,
+    )
+
 
 def run_train_loop(
     model,
@@ -36,10 +134,15 @@ def run_train_loop(
 
     try:
         for batch_index in range(
-            n_pretrained_batches, n_pretrained_batches + n_batches
+            n_pretrained_batches, n_pretrained_batches + (n_batches * 2)
         ):
 
             if (batch_index == next_warm_restart) or (lr_scheduler is None):
+
+                # Break at lowest LR point.
+                if batch_index >= (n_pretrained_batches + n_batches):
+                    break
+
                 next_phaseout = 100
                 if lr_scheduler is not None:
                     next_phaseout = 2 * lr_scheduler.T_max
