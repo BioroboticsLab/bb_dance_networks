@@ -1,6 +1,7 @@
 import datetime
 import numpy as np
 import pandas
+import itertools
 
 import bb_behavior.db
 import bb_behavior.utils.misc
@@ -101,18 +102,18 @@ def merge_predictions_to_events(
         mid_timestamp_index = sequence_length // 2
         last_bee_timestamp = None
 
-        for idx in range(prediction_margin, predictions.shape[0] - prediction_margin):
+        for idx in range(predictions.shape[0]):
             frame_id, cam_id = df.frame_id.iloc[idx], df.cam_id.iloc[idx]
 
             labels = predictions[idx] > confidence_threshold
-            if labels[1:, :].sum() == 0:
-                continue
             labels = np.argmax(labels, axis=0)
             assert labels.shape[0] > 3
+            if np.sum(labels) == 0:
+                continue
 
             mid_timestamp = df.timestamp.iloc[idx]
 
-            for t in range(sequence_length):
+            for t in range(prediction_margin, sequence_length - prediction_margin):
                 l = labels[t]
                 conf = predictions[idx, l, t]
                 ts = mid_timestamp + datetime.timedelta(
@@ -187,7 +188,7 @@ def merge_consecutive_events(
 
 def extract_consecutive_dance_events(
     all_events,
-    min_dance_duration=datetime.timedelta(seconds=3),
+    min_dance_duration=datetime.timedelta(seconds=4),
     max_dance_gap_length=datetime.timedelta(seconds=3),
 ):
     dances_df = []
@@ -253,8 +254,9 @@ def fetch_follower_from_database(
                     if det is None:
                         continue
                     (ts, frame_id, x, y, orientation, track_id) = det
-                    xlim = [x - 14, x + 14]
-                    ylim = [y - 14, y + 14]
+                    max_distance = 14
+                    xlim = [x - max_distance, x + max_distance]
+                    ylim = [y - max_distance, y + max_distance]
                     candidates = (
                         bb_behavior.db.sampling.get_detections_for_location_in_frame(
                             frame_id,
@@ -281,10 +283,14 @@ def fetch_follower_from_database(
 
                         # Calculate orientation to check whether potential follower is orientated towards dancer.
                         dxy = np.array([(x - c_x), (y - c_y)], dtype=np.float32)
-                        dxy /= np.linalg.norm(dxy)
+                        distance = np.linalg.norm(dxy)
+                        if distance > max_distance:
+                            continue
+                        # Normalize directional vector.
+                        dxy /= distance
                         oxy = np.array([np.cos(c_o), np.sin(c_o)])
                         relative_angle = np.inner(dxy, oxy)
-                        if relative_angle < 0.5:
+                        if relative_angle < 0.0:
                             continue
 
                         bee_id_count[bee_id] += 1
@@ -301,7 +307,7 @@ def fetch_follower_from_database(
                 for follower_id, follower_df in bee_candidates.groupby("bee_id"):
                     follower_df = follower_df.sort_values("timestamp")
 
-                    def fetch_label(timestamp):
+                    def fetch_follower_label(timestamp):
                         begin = timestamp - datetime.timedelta(seconds=1.0 / fps)
                         end = timestamp + datetime.timedelta(seconds=1.0 / fps)
 
@@ -309,7 +315,7 @@ def fetch_follower_from_database(
                         events = events[
                             (events.timestamp > begin) & (events.timestamp < end)
                         ]
-                        label = "unknown"
+                        label = "attendance"
                         if events.shape[0] > 0:
                             label = list(set(events.label.values))
                             if len(label) > 1 and label[0] != 0 and verbose:
@@ -322,19 +328,37 @@ def fetch_follower_from_database(
                                     )
                                 )
                             label = label[-1]
-                            label = ["nothing", "follower", "follower"][label]
+                            label = ["attendance", "follower", "follower"][label]
 
                         return label
 
-                    follower_events = merge_consecutive_events(
+                    attendance_events = merge_consecutive_events(
                         follower_df[["timestamp"]].itertuples(index=False),
                         min_duration=min_following_duration,
                         max_gap_length=max_following_gap_length,
                         timestamp_key=lambda d: d[0],
-                        class_key=lambda d: fetch_label(d[0]),
+                        class_key=lambda d: "attendance",
                     )
 
-                    for (ts_from, ts_to, label) in follower_events:
+                    follower_timestamps = [
+                        (ts, fetch_follower_label(ts))
+                        for (ts,) in follower_df[["timestamp"]].itertuples(index=False)
+                    ]
+                    follower_timestamps = [
+                        f for f in follower_timestamps if f[1] == "follower"
+                    ]
+
+                    follower_events = merge_consecutive_events(
+                        follower_timestamps,
+                        min_duration=min_following_duration,
+                        max_gap_length=max_following_gap_length,
+                        timestamp_key=lambda d: d[0],
+                        class_key=lambda d: d[1],
+                    )
+
+                    for (ts_from, ts_to, label) in itertools.chain(
+                        attendance_events, follower_events
+                    ):
                         all_follower_events.append(
                             (dance_id, follower_id, ts_from, ts_to, label)
                         )
