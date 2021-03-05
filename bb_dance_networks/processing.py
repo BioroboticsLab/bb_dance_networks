@@ -16,6 +16,7 @@ def apply_model_to_interval(
     cam_ids,
     n_threads=8,
     verbose=False,
+    cuda=True,
 ):
 
     import bb_behavior.db
@@ -71,10 +72,13 @@ def apply_model_to_interval(
     normalizer = FeatureNormalizer.load(feature_normalizer_path)
     datareader.X[:] = normalizer.transform(datareader.X)
 
-    model = torch.load(model_path)
+    model_kwargs = dict()
+    if not cuda:
+        model_kwargs["map_location"] = torch.device("cpu")
+    model = torch.load(model_path, **model_kwargs)
     model.eval()
     pred = model.predict_trajectories(
-        datareader.X, return_logits=False, medianfilter=True
+        datareader.X, return_logits=False, medianfilter=True, cuda=cuda
     )
     del model
 

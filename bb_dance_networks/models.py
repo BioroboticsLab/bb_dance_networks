@@ -267,13 +267,18 @@ class TrajectoryClassificationModel(torch.nn.Module):
         )
         return loss
 
-    def predict_trajectories(self, X, return_logits=False, medianfilter=False):
+    def predict_trajectories(
+        self, X, return_logits=False, medianfilter=False, cuda=True
+    ):
         self.eval()
         trajectory_predictions = []
         for batch in bb_behavior.utils.model_selection.iterate_minibatches(
             X, None, 2048, include_small_last_batch=True
         ):
-            pred = self(torch.from_numpy(batch).cuda())
+            input_X = torch.from_numpy(batch)
+            if cuda:
+                input_X = input_X.cuda()
+            pred = self(input_X)
 
             if not return_logits:
                 pred = torch.nn.functional.softmax(pred, dim=1)
